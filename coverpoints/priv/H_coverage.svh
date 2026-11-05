@@ -99,6 +99,93 @@ covergroup H_hscsr_cg with function sample(ins_t ins);
     cp_hcsr_access_zero:    cross priv_mode_hs, hcsrname_zero, csraccesses;
     cp_hcsr_access_masked:  cross priv_mode_hs, hcsrname_masked, csraccesses_masked;
     cp_hcsr_access_ro:      cross priv_mode_hs, hgeip, csraccesses;
+
+    // CSR immediate forms: CSRRWI always writes, including zimm=0; CSRRSI/CSRRCI
+    // suppress writes only when zimm=0. Test generator checks rd and readback.
+    csrimmops : coverpoint ins.current.insn {
+        wildcard bins csrrwi = {CSRRWI};
+        wildcard bins csrrsi = {CSRRSI};
+        wildcard bins csrrci = {CSRRCI};
+    }
+    hcsr_zimm : coverpoint ins.current.insn[19:15] {
+        bins zero = {5'd0};
+        bins five = {5'd5};
+    }
+    cp_hcsr_imm:        cross priv_mode_hs, hcsrname, csrimmops, hcsr_zimm;
+    cp_hcsr_imm_zero:   cross priv_mode_hs, hcsrname_zero, csrimmops, hcsr_zimm;
+    cp_hcsr_imm_masked: cross priv_mode_hs, hcsrname_masked, csrimmops, hcsr_zimm;
+    cp_hcsr_imm_ro:     cross priv_mode_hs, hgeip, csrimmops, hcsr_zimm;
+
+    // With a non-x0 register containing zero, CSRRS/CSRRC still attempt a write.
+    // With rs1=x0 they read without writing, including on read-only hgeip.
+    hgeip_zero_regop : coverpoint ins.current.insn {
+        wildcard bins csrrs_x0   = {CSRRS} iff (ins.current.insn[19:15] == 5'd0);
+        wildcard bins csrrc_x0   = {CSRRC} iff (ins.current.insn[19:15] == 5'd0);
+        wildcard bins csrrs_reg0 = {CSRRS} iff (ins.current.insn[19:15] != 5'd0 && ins.current.rs1_val == 0);
+        wildcard bins csrrc_reg0 = {CSRRC} iff (ins.current.insn[19:15] != 5'd0 && ins.current.rs1_val == 0);
+    }
+    cp_hcsr_ro_reg0: cross priv_mode_hs, hgeip, hgeip_zero_regop;
+
+    // rd receives the old value. CSRRW with rs1=x0 writes zero;
+    // only CSRRS/CSRRC with rs1=x0 suppress the write.
+    hcsr_regops : coverpoint ins.current.insn {
+        wildcard bins csrrw      = {CSRRW} iff (ins.current.insn[19:15] != 5'd0);
+        wildcard bins csrrs_reg0 = {CSRRS} iff (ins.current.insn[19:15] != 5'd0 && ins.current.rs1_val == 0);
+        wildcard bins csrrc_reg0 = {CSRRC} iff (ins.current.insn[19:15] != 5'd0 && ins.current.rs1_val == 0);
+        wildcard bins csrrs_x0   = {CSRRS} iff (ins.current.insn[19:15] == 5'd0);
+        wildcard bins csrrc_x0   = {CSRRC} iff (ins.current.insn[19:15] == 5'd0);
+        wildcard bins csrrw_x0   = {CSRRW} iff (ins.current.insn[19:15] == 5'd0);
+    }
+    hcsr_nonzero_rd : coverpoint ins.current.insn[11:7] {
+        type_option.weight = 0;
+        bins nonzero = {[1:31]};
+    }
+    // Old-value tests classify reserved hedelegh separately without changing access/walk bins.
+    hcsr_oldvalue_name : coverpoint ins.current.insn[31:20] {
+        bins hedeleg    = {CSR_HEDELEG};
+        bins hideleg    = {CSR_HIDELEG};
+        bins hie        = {CSR_HIE};
+        bins hcounteren = {CSR_HCOUNTEREN};
+        bins hgeie      = {CSR_HGEIE};
+        bins hip        = {CSR_HIP};
+        bins hvip       = {CSR_HVIP};
+        `ifdef ZICNTR_SUPPORTED
+            bins htimedelta = {CSR_HTIMEDELTA};
+        `endif
+        bins vsstatus   = {CSR_VSSTATUS};
+        bins vsie       = {CSR_VSIE};
+        bins vstval     = {CSR_VSTVAL};
+        bins vsip       = {CSR_VSIP};
+        bins vstvec     = {CSR_VSTVEC};
+        bins vsscratch  = {CSR_VSSCRATCH};
+        bins vsepc      = {CSR_VSEPC};
+        `ifdef SSTC_SUPPORTED
+            bins vstimecmp = {CSR_VSTIMECMP};
+        `endif
+        `ifdef UDB_MXLEN_32
+            `ifdef ZICNTR_SUPPORTED
+                bins htimedeltah = {CSR_HTIMEDELTAH};
+            `endif
+            `ifdef SSTC_SUPPORTED
+                bins vstimecmph = {CSR_VSTIMECMPH};
+            `endif
+        `endif
+    }
+    hcsr_oldvalue_zero_name : coverpoint ins.current.insn[31:20] {
+        bins htval  = {CSR_HTVAL};
+        bins htinst = {CSR_HTINST};
+        bins hgatp  = {CSR_HGATP};
+        bins vsatp  = {CSR_VSATP};
+        `ifdef UDB_MXLEN_32
+            `ifdef SM1P13P0_OR_LATER_SUPPORTED
+                bins hedelegh = {CSR_HEDELEGH};
+            `endif
+        `endif
+    }
+    cp_hcsr_oldvalue:        cross priv_mode_hs, hcsr_oldvalue_name, hcsr_regops, hcsr_nonzero_rd;
+    cp_hcsr_oldvalue_zero:   cross priv_mode_hs, hcsr_oldvalue_zero_name, hcsr_regops, hcsr_nonzero_rd;
+    cp_hcsr_oldvalue_masked: cross priv_mode_hs, hcsrname_masked, hcsr_regops, hcsr_nonzero_rd;
+
     cp_hcsrwalk:            cross priv_mode_hs, hcsrname, csrop, walking_ones {
         // vsepc and vstval may legalize invalid addresses, so they are walked with valid addresses instead
         ignore_bins vaddr = binsof(hcsrname.vsepc) || binsof(hcsrname.vstval);
