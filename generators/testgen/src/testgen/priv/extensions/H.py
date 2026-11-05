@@ -27,6 +27,7 @@ from testgen.priv.extensions.HCommon import (
     guest_page_fault_tests,
     hcsr_semantics_tests,
     hcsr_tests,
+    hcsr_write_denial_tests,
     hlv_tests,
     replica_read,
     replica_rw_tests,
@@ -267,6 +268,12 @@ def _vu_csr_tests(test_data: TestData, test_chunks: list[TestChunk]) -> None:
     csr_ro_write_tests(
         test_data, test_chunks, VU_CG, USER_RO_CSR_RANGES, "vucsr_ro", mode="VU", csrs_per_chunk=CSRS_PER_CHUNK
     )
+    hcsr_write_denial_tests(test_data, test_chunks, HS_VS_CSRS, VU_CG, "VU", "vucsr_write")
+
+
+def _u_csr_tests(test_data: TestData, test_chunks: list[TestChunk]) -> None:
+    """Ensure U-mode writes to H/VS CSRs are denied, not just reads."""
+    hcsr_write_denial_tests(test_data, test_chunks, HS_VS_CSRS, INST_CG, "U", "ucsr_write")
 
 
 def _xret_tests(test_data: TestData) -> list[str]:
@@ -421,6 +428,7 @@ def make_h(test_data: TestData) -> list[TestChunk]:
 
     _vs_csr_tests(test_data, test_chunks)
     _vu_csr_tests(test_data, test_chunks)
+    _u_csr_tests(test_data, test_chunks)
 
     tc = test_data.new_test_chunk(test_chunks, "inst")
     tc.code.extend(

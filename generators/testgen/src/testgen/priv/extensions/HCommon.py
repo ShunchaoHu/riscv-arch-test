@@ -430,6 +430,51 @@ def hcsr_semantics_tests(
         td.int_regs.return_registers([orig, expected, rd, zero, check, mask])
 
 
+def hcsr_write_denial_tests(
+    td: TestData, chunks: list[TestChunk], csrs: list[HCsr], cg: str, mode: str, chunk_name: str
+) -> None:
+    """Write H/VS CSRs from U or VU and verify the trapping instruction does not modify rd.
+
+    Trap signatures independently check the exception cause. In VU, a write disallowed in HS (notably to read-only hgeip)
+    causes illegal instruction rather than virtual instruction.
+    """
+    for offset in range(0, len(csrs), 16):
+        # Match the H suite's convention: mark only the first chunk as a named split.
+        tc = td.new_test_chunk(chunks, chunk_name if offset == 0 else None)
+        if offset == 0:
+            tc.section_header = comment_banner("cp_csr_write_denied", f"Denied H CSR writes from {mode}-mode")
+        group = csrs[offset : offset + 16]
+        src, rd = td.int_regs.get_registers(2)
+        code: list[str] = []
+
+        # Setup and cleanup run in HS-mode, never in U/VU.  These conditions are
+        # required for certain CSRs (vsie/vsip delegation, vstimecmp STCE,
+        # hedelegh state-enable) to test the intended permission check.
+        for csr in group:
+            if csr.setup:
+                code.extend(gated(list(csr.setup), csr.gate))
+        code.append(f"RVTEST_TSBI_GOTO_{mode}MODE")
+        for csr in group:
+            code.extend(
+                gated(
+                    [
+                        f"LI(x{src}, -1)",
+                        f"LI(x{rd}, 42)",
+                        td.add_testcase(f"{mode.lower()}_{csr.name}_write_denied", "cp_csr_write_denied", cg),
+                        f"csrrw x{rd}, {csr.operand}, x{src}",
+                        write_sigupd(rd, td),
+                    ],
+                    csr.gate,
+                )
+            )
+        code.append("RVTEST_TSBI_GOTO_SMODE")
+        for csr in reversed(group):
+            if csr.restore:
+                code.extend(gated(list(csr.restore), csr.gate))
+        tc.code.extend(code)
+        td.int_regs.return_registers([src, rd])
+
+
 def _atp_walk_test(test_data: TestData, csr: str, covergroup: str) -> list[str]:
     """Walk a 1 and a 0 through the non-MODE bits of hgatp or vsatp with MODE = Sv39(x4) or Sv32(x4).
 
